@@ -15,22 +15,76 @@ import zio.stream._
 import scala.jdk.CollectionConverters._
 import scala.collection.compat._
 
-class Consumer private (
-  private val consumer: ConsumerAccess,
-  private val settings: ConsumerSettings,
-  private val runloop: Runloop
-) {
-  self =>
+object Consumer2 {
+  trait Service[R, K, V] {
 
-  /**
-   * Returns the topic-partitions that this consumer is currently assigned.
-   *
-   * This is subject to consumer rebalancing, unless using a manual subscription.
-   */
-  def assignment: BlockingTask[Set[TopicPartition]] =
+    /**
+     * Returns the topic-partitions that this consumer is currently assigned.
+     *
+     * This is subject to consumer rebalancing, unless using a manual subscription.
+     */
+    def assignment: BlockingTask[Set[TopicPartition]]
+
+    def beginningOffsets(
+      partitions: Set[TopicPartition],
+      timeout: Duration = Duration.Infinity
+    ): BlockingTask[Map[TopicPartition, Long]]
+
+    /**
+     * Retrieve the last committed offset for the given topic-partitions
+     */
+    def committed(
+      partitions: Set[TopicPartition],
+      timeout: Duration = Duration.Infinity
+    ): BlockingTask[Map[TopicPartition, Option[OffsetAndMetadata]]]
+
+    def endOffsets(
+      partitions: Set[TopicPartition],
+      timeout: Duration = Duration.Infinity
+    ): BlockingTask[Map[TopicPartition, Long]]
+
+    def listTopics(timeout: Duration = Duration.Infinity): BlockingTask[Map[String, List[PartitionInfo]]]
+
+    /**
+     * Create a stream with messages on the subscribed topic-partitions by topic-partition
+     *
+     * The top-level stream will emit new topic-partition streams for each topic-partition that is assigned
+     * to this consumer. This is subject to consumer rebalancing, unless a manual subscription
+     * was made. When rebalancing occurs, new topic-partition streams may be emitted and existing
+     * streams may be completed.
+     *
+     * All streams can be completed by calling [[stopConsumption]].
+     *
+     * @param keyDeserializer Deserializer for the record keys
+     * @param valueDeserializer Deserializer for the record values
+     * @return
+     */
+    def partitionedStream(
+                                    keyDeserializer: Deserializer[R, K],
+                                    valueDeserializer: Deserializer[R, V]
+                                  ): ZStream[
+      Clock with Blocking,
+      Throwable,
+      (TopicPartition, ZStreamChunk[R, Throwable, CommittableRecord[K, V]])
+    ]
+
+    /**
+     * Stops consumption of data, drains buffered records, and ends the attached
+     * streams while still serving commit requests.
+     */
+    def stopConsumption: UIO[Unit]
+  }
+
+  final case class Live[R, K, V](
+    private val consumer: ConsumerAccess,
+    private val settings: ConsumerSettings,
+    private val runloop: Runloop
+  ) extends Service[R, K, V] {
+
+  override def assignment: BlockingTask[Set[TopicPartition]] =
     consumer.withConsumer(_.assignment().asScala.toSet)
 
-  def beginningOffsets(
+  overridef beginningOffsets(
     partitions: Set[TopicPartition],
     timeout: Duration = Duration.Infinity
   ): BlockingTask[Map[TopicPartition, Long]] =
@@ -38,9 +92,6 @@ class Consumer private (
       _.beginningOffsets(partitions.asJava, timeout.asJava).asScala.view.mapValues(_.longValue()).toMap
     )
 
-  /**
-   * Retrieve the last committed offset for the given topic-partitions
-   */
   def committed(
     partitions: Set[TopicPartition],
     timeout: Duration = Duration.Infinity

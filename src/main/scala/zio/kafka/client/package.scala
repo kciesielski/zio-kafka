@@ -18,5 +18,6 @@ package object client {
   type ByteArrayProducer       = KafkaProducer[Array[Byte], Array[Byte]]
   type ByteArrayProducerRecord = ProducerRecord[Array[Byte], Array[Byte]]
 
-  type Producer[R, K, V] = Has[Producer.Service[R, K, V]]
+  type Producer[R, K, V]    = Has[Producer.Service[R, K, V]]
+  type HasConsumer[R, K, V] = Has[Consumer2.Service[R, K, V]]
 }
